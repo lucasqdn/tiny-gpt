@@ -54,3 +54,35 @@ Total tokens trained: 10,240,000
 
 ## Questions
 Character perplexity and bits per character
+
+## Things to improve next
+Text generation
+Checkpoint saving
+Averaged training evaluation, matching validation evaluation
+Fixed validation batches so every run uses identical examples
+
+
+# Run 4
+## Values
+steps = 50000
+sequence_length = 128
+d_model = 384
+n_heads = 6
+dropout = 0.0
+n_layers = 8
+
+Run summary
+Initial training loss: 5.3590
+Final training loss: 0.7569
+Average training loss: 0.7604
+Average validation loss: 0.7378
+Elapsed training time: 1188.33 seconds
+Tokens per second: 43,086
+Total tokens trained: 51,200,000
+
+Generated sample:
+Once upon a time, there was a little girl named Lily. One day, Lily was outside when her mommy accidentally past the ball down and said, "I can frown this car, but you must have passed them all." 
+
+Molly smiled and said, "Okay, I love you!"
+
+The carefully tasted the cord and dressed and the lawyer went to play, fee

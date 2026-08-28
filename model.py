@@ -199,8 +199,33 @@ class TinyGPT(nn.Module):
     
     @torch.no_grad()
     def generate(self, token_ids, max_new_tokens, temperature=1.0):
+
+        if temperature <= 0:
+            raise ValueError("temperature must be positive")
+
+        # Generate number of max_new_tokens
         for _ in range(max_new_tokens):
             # keep context that fits in the model
+            # index every batch from -max sequence length to the end
             context = token_ids[:, -self.max_seq_len:]
 
+            # This runs self.forward(context) by calling on its own
+            # logits returns (B, T, V)
             logits, _ = self(context)
+
+            # Final position predicts the next token
+            next_token_logits = logits[:, -1, :]
+            # Temperature control randomness (lower temperature make difference larger and vice versa)
+            next_token_logits = next_token_logits / temperature
+
+            # Softmax along the vocabulary dimension
+            probabilities = F.softmax(next_token_logits, dim=-1)
+
+            # Randomly sample index based on probabilities
+            next_token = torch.multinomial(probabilities, num_samples=1)
+
+            # Concatenate the new token to token_ids
+            token_ids = torch.cat([token_ids, next_token], dim=1)
+
+        return token_ids
+
