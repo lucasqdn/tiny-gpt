@@ -88,7 +88,7 @@ optimizer = torch.optim.AdamW(
     weight_decay=0.1,
 )
 
-num_steps = 1_000
+num_steps = 10_000
 running_loss = 0
 initial_training_loss = None
 final_training_loss = None

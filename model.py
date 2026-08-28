@@ -187,6 +187,7 @@ class TinyGPT(nn.Module):
         return logits, loss
 
     def _init_weights(self, module):
+        # Check if the module is linear or embedding
         if isinstance(module, (nn.Linear, nn.Embedding)):
             nn.init.normal_(
                 module.weight,
@@ -195,3 +196,11 @@ class TinyGPT(nn.Module):
             )
         if isinstance(module, nn.Linear) and module.bias is not None:
             nn.init.zeros_(module.bias)
+    
+    @torch.no_grad()
+    def generate(self, token_ids, max_new_tokens, temperature=1.0):
+        for _ in range(max_new_tokens):
+            # keep context that fits in the model
+            context = token_ids[:, -self.max_seq_len:]
+
+            logits, _ = self(context)
