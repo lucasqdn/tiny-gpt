@@ -18,17 +18,16 @@ model.load_state_dict(checkpoint["model_state_dict"])
 model.eval()
 
 
-def encode(text):
-    return [stoi[character] for character in text]
+# def encode(text):
+#     return [stoi[character] for character in text]
 
 
-def decode(token_ids):
-    return "".join(
-        itos[token_id]
-        for token_id in token_ids
-        if token_id != eos_id
-    )
-
+# def decode(token_ids):
+#     return "".join(
+#         itos[token_id]
+#         for token_id in token_ids
+#         if token_id != eos_id
+#     )
 
 # Makes the generation test reproducible.
 torch.manual_seed(2026)
