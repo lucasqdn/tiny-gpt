@@ -104,7 +104,7 @@ optimizer = torch.optim.AdamW(
     weight_decay=0.1,
 )
 
-num_steps = 50000
+num_steps = 5000
 running_loss = 0
 initial_training_loss = None
 final_training_loss = None
@@ -212,7 +212,7 @@ print(f"Generated tokens: {generated_tokens}")
 checkpoint_directory = Path("checkpoints")
 checkpoint_directory.mkdir(exist_ok=True)
 
-checkpoint_path = checkpoint_directory / f"tiny_gpt_run6_step_{num_steps}.pt"
+checkpoint_path = checkpoint_directory / f"tiny_gpt_run7_step_{num_steps}.pt"
 
 torch.save(
     {

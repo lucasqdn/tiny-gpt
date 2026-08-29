@@ -51,7 +51,7 @@ class AttentionHead(nn.Module):
         return out
 
 
-class MultiHeadAttention(nn.Module):
+class ReferenceMultiHeadAttention(nn.Module):
     def __init__(self, d_model: int, n_heads: int, dropout: float = 0.0):
         super().__init__()
 
@@ -77,6 +77,74 @@ class MultiHeadAttention(nn.Module):
         # out_proj mixes information from different heads
         return self.out_proj(out)
 
+# Vectorized MultiHeadAttention
+class MultiHeadAttention(nn.Module):
+    def __init__(self, d_model, n_heads, max_seq_len, dropout=0.0):
+        super().__init__()
+
+        if d_model % n_heads != 0:
+            raise ValueError("d_model must be divisible by n_heads")
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.head_dim = d_model // n_heads
+
+        self.qkv_proj = nn.Linear(d_model, 3*d_model, bias=False)
+        self.out_proj = nn.Linear(d_model, d_model, bias=False)
+
+        self.attention_dropout = nn.Dropout(dropout)
+
+        causal_mask = torch.tril(torch.ones(max_seq_len, max_seq_len, dtype=torch.bool))
+        self.register_buffer("causal_mask", causal_mask, persistent=False)
+    
+    def forward(self, x):
+        B, T, C = x.shape
+
+        qkv = self.qkv_proj(x)
+        
+        # Split them into three (B, T, C) chunks
+        q, k, v = qkv.chunk(3, dim=-1)
+
+        # (B, T, C) -> (B, T, H, D) -> (B, H, T, D)
+        # You can split it since H * D = C
+        q = q.view(B, T, self.n_heads, self.head_dim)
+        q = q.transpose(1,2)
+
+        k = k.view(B, T, self.n_heads, self.head_dim)
+        k = k.transpose(1,2)
+
+        v = v.view(B, T, self.n_heads, self.head_dim)
+        v = v.transpose(1,2)
+
+        # (B, H, T, D) @ (B, H, D, T) --> (B, H, T, T)
+        scores = q @ k.transpose(-2, -1)
+        scores = scores / self.head_dim**0.5
+
+        # (T, T) broadcasts across B and H.
+        mask = self.causal_mask[:T, :T]
+        scores = scores.masked_fill(
+            ~mask, float("-inf")
+        )
+
+        weights = torch.softmax(scores, dim=-1)
+        weights = self.attention_dropout(weights)
+
+        # (B, H, T, T) @ (B, H, T, D) --> (B, H, T, D)
+        out = weights @ v
+
+        # (B, H, T, D) --> (B, T, H, D)
+        out = out.transpose(1,2)
+
+        # transpose() changes the logical order without rearranging
+        # memory. contiguous() creates correctly ordered memory so
+        # view() can combine H and D.
+        out = out.contiguous().view(B, T, C)
+
+        return self.out_proj(out)
+
+
+
+
+
 class FeedForward(nn.Module):
     def __init__(self, d_model, dropout=0.0):
         super().__init__()
@@ -95,7 +163,7 @@ class FeedForward(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, d_model, n_heads, dropout=0.0):
+    def __init__(self, d_model, n_heads, max_seq_len, dropout=0.0):
         super().__init__()
 
         self.d_model = d_model
@@ -103,7 +171,7 @@ class TransformerBlock(nn.Module):
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
 
-        self.attention = MultiHeadAttention(d_model, n_heads, dropout)
+        self.attention = MultiHeadAttention(d_model, n_heads, max_seq_len, dropout)
         self.feed_forward = FeedForward(d_model, dropout)
 
     def forward(self, x):
@@ -134,7 +202,7 @@ class TinyGPT(nn.Module):
         self.position_embedding = nn.Embedding(max_seq_len, d_model)
 
         self.blocks = nn.Sequential(*[
-            TransformerBlock(d_model, n_heads, dropout)
+            TransformerBlock(d_model, n_heads, max_seq_len, dropout)
             for _ in range(n_layers)
         ])
 
