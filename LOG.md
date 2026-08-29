@@ -179,3 +179,31 @@ More coherent in stories but still lacking
 ## Final conclusion
 Run 6 improved effective context, textual throughput and reliable story completition
 
+
+# Run 7
+
+## Run summary
+Initial training loss: 7.6867
+Final training loss: 2.9596
+Average training loss: 3.0176
+Average validation loss: 3.0411
+Elapsed training time: 74.60 seconds
+Tokens per second: 68,634
+Total tokens trained: 5,120,000
+
+## Generated sample:
+Once upon a time. Lucy tried them all about her upet to go home inback to the world. She scollected them together all the different things day it would get her find her way home. So she went back home. 
+
+When it was time for writ, itchies were out there. 
+
+"Wow!" said Sam. "Thank you to go home now" and go outside and explore the big field.
+Stopped at EOS: True
+Generated tokens: 80
+
+## Verdict
+Throughput sped up by 2.03x --> roughly 286500 source bytes/second
+
+## What to work on next
+- Pretokenize the data
+- BF16
+- Test larger batch sizes
