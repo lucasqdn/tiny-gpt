@@ -125,3 +125,57 @@ The model successfully learn how to use EOS
 ## What to improve on next run
 Switch to BPE, maybe 2048 tokens
 Still keeping other values the same
+
+# BPE Optimization
+Priority queue with linked-list indexing
+The current problem is that if a story needs 200 merges, the story will be rebuilt and scan 200 times
+1. Finds all mergable pairs once
+2. Stores them in a priority queue
+3. Merges the highest priority pair
+4. Updates the 2 neighbouring pairs affected by the merge
+
+
+# Run 6 (BPE Run)
+steps = 50000
+vocab_size = 2048 (BPE)
+sequence_length = 128
+d_model = 384
+n_heads = 6
+dropout = 0.0
+n_layers = 8
+
+## Run summary
+Initial training loss: 7.6950
+Final training loss: 2.1878
+Average training loss: 2.2547
+Average validation loss: 2.2663
+Elapsed training time: 1512.71 seconds
+Tokens per second: 33,847
+Total tokens trained: 51,200,000
+
+## Generated sample:
+Once upon a time. Lucy tried trying to resist, but it didn't work. She tried and tried, but it still still landed in the ground. She started to get frustrated.
+
+Suddenly, Lucy saw something unusual. It was a big green bunny! It was cutting from a leaf. It was the owner's bunny's name. The bunny was very happy to see Lucy and kept her promise. Lucy was happy to have her promise!
+
+## Verdict
+Initial loss roughly ln(2048)
+Lower token throughput
+But 4.174 source bytes per BPE token
+51.2 million BPE tokens --> 214 million source bytes
+4.17x more text than run 5
+Effective textual throughput is 33.847 * 4.174 = 141000
+
+## Evaluate.py
+20/20 stopped at EOS
+Average story length: 92.2 BPE tokens
+Reached story endings rather than stopping early
+More coherent in stories but still lacking
+
+## Things to improve on
+- Semantic coherence and word repetition
+- Malformed grammar and words "timerid" or "teachingme"
+
+## Final conclusion
+Run 6 improved effective context, textual throughput and reliable story completition
+

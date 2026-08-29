@@ -1,33 +1,29 @@
 import torch
 
 from model import TinyGPT
+from tokenizer import decode, encode, load_tokenizer
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 checkpoint = torch.load(
-    "checkpoints/tiny_gpt_run5_step_50000.pt",
-    map_location = device,
+    "checkpoints/tiny_gpt_run6_step_50000.pt",
+    map_location=device,
 )
 
-stoi = checkpoint["stoi"]
-itos = {token_id: token for token, token_id in stoi.items()}
-eos_id = stoi["<EOS>"]
+tokenizer_path = checkpoint["tokenizer_path"]
+merges, vocab, eos_id, vocab_size = load_tokenizer(
+    tokenizer_path
+)
+
+if vocab_size != checkpoint["config"]["vocab_size"]:
+    raise ValueError("Tokenizer and model vocabulary sizes do not match")
+
+if eos_id != checkpoint["eos_id"]:
+    raise ValueError("Tokenizer and checkpoint EOS IDs do not match")
 
 model = TinyGPT(**checkpoint["config"]).to(device)
 model.load_state_dict(checkpoint["model_state_dict"])
 model.eval()
-
-
-# def encode(text):
-#     return [stoi[character] for character in text]
-
-
-# def decode(token_ids):
-#     return "".join(
-#         itos[token_id]
-#         for token_id in token_ids
-#         if token_id != eos_id
-#     )
 
 # Makes the generation test reproducible.
 torch.manual_seed(2026)
@@ -38,12 +34,12 @@ number_of_samples = 20
 max_new_tokens = 500
 
 eos_stops = 0
-# Store all stories length
-generated_lengths = []
+generated_token_lengths = []
+generated_character_lengths = []
 
 for sample_number in range(number_of_samples):
     prompt_ids = torch.tensor(
-        [encode(prompt)],
+        [encode(prompt, merges)],
         dtype=torch.long,
         device=device,
     )
@@ -62,20 +58,30 @@ for sample_number in range(number_of_samples):
 
     if stopped_at_eos:
         eos_stops += 1
-        text_length = len(new_ids) - 1  # Don't count EOS.
-    else:
-        text_length = len(new_ids)
 
-    generated_lengths.append(text_length)
+    # EOS is not visible text, so don't count it as a generated token.
+    generated_token_length = len(new_ids) - int(stopped_at_eos)
+    generated_text = decode(new_ids, vocab, eos_id)
+
+    generated_token_lengths.append(generated_token_length)
+    generated_character_lengths.append(len(generated_text))
 
     # Print only the first three stories.
     if sample_number < 3:
         print(f"\nSample {sample_number + 1}")
         print(f"Stopped at EOS: {stopped_at_eos}")
-        print(decode(generated_ids[0].tolist()))
+        print(f"Generated BPE tokens: {generated_token_length}")
+        print(decode(generated_ids[0].tolist(), vocab, eos_id))
 
 
 print("\nEOS evaluation")
 print(f"EOS stops: {eos_stops}/{number_of_samples}")
 print(f"Stop rate: {eos_stops / number_of_samples:.1%}")
-print(f"Average generated length: {sum(generated_lengths) / len(generated_lengths):.1f}")
+print(
+    "Average generated BPE tokens: "
+    f"{sum(generated_token_lengths) / len(generated_token_lengths):.1f}"
+)
+print(
+    "Average generated characters: "
+    f"{sum(generated_character_lengths) / len(generated_character_lengths):.1f}"
+)

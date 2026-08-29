@@ -3,6 +3,11 @@ import random
 import time
 from datasets import load_from_disk
 from model import TinyGPT
+from tokenizer import (
+    decode as bpe_decode,
+    encode as bpe_encode,
+    load_tokenizer,
+)
 from values import d_model, dropout, max_seq_len, n_heads, n_layers
 from pathlib import Path
 
@@ -13,29 +18,16 @@ train_ds = load_from_disk("data/TinyStories/train")
 validation_ds = load_from_disk("data/TinyStories/validation")
 print("Training and validation datasets loaded successfully.")
 
+tokenizer_path = Path("tinystories_bpe_2048.json")
+merges, vocab, eos_id, vocab_size = load_tokenizer(tokenizer_path)
+print(f"BPE tokenizer loaded successfully. Vocabulary size: {vocab_size}")
+
 random.seed(1337)
 torch.manual_seed(1337)
 torch.cuda.manual_seed_all(1337)
 training_rng = random.Random(1337)
 training_eval_rng = random.Random(2024)
 validation_rng = random.Random(2025)
-
-# Build one character vocabulary across the entire training split.
-characters = set()
-for story in train_ds["text"]:
-    # update breaks down the words into characters and add them to the set
-    characters.update(story)
-
-EOS_TOKEN = "<EOS>"
-
-characters = sorted(characters)
-stoi = {character: i for i, character in enumerate(characters)}
-
-eos_id = len(stoi)
-stoi[EOS_TOKEN] = eos_id
-
-itos = {i: character for character, i in stoi.items()}
-vocab_size = len(stoi)
 
 model = TinyGPT(
     vocab_size=vocab_size,
@@ -47,10 +39,10 @@ model = TinyGPT(
 ).to(device)
 
 def encode(text):
-    return [stoi[character] for character in text]
+    return bpe_encode(text, merges)
 
 def decode(token_ids):
-    return "".join(itos[token_id] for token_id in token_ids if token_id != eos_id)
+    return bpe_decode(token_ids, vocab, eos_id)
 
 batch_size = 8
 sequence_length = 128
@@ -112,7 +104,7 @@ optimizer = torch.optim.AdamW(
     weight_decay=0.1,
 )
 
-num_steps = 50_000
+num_steps = 50000
 running_loss = 0
 initial_training_loss = None
 final_training_loss = None
@@ -199,7 +191,11 @@ model.eval()
 
 prompt = "Once upon a time"
 
-prompt_ids = torch.tensor([[stoi[character] for character in prompt]], dtype=torch.long, device=device)
+prompt_ids = torch.tensor(
+    [encode(prompt)],
+    dtype=torch.long,
+    device=device,
+)
 
 generated_ids = model.generate(prompt_ids, max_new_tokens=300, temperature=0.8, eos_id=eos_id)
 
@@ -216,14 +212,15 @@ print(f"Generated tokens: {generated_tokens}")
 checkpoint_directory = Path("checkpoints")
 checkpoint_directory.mkdir(exist_ok=True)
 
-checkpoint_path = (checkpoint_directory / f"tiny_gpt_run5_step_{num_steps}.pt")
+checkpoint_path = checkpoint_directory / f"tiny_gpt_run6_step_{num_steps}.pt"
 
 torch.save(
     {
         "step": num_steps,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
-        "stoi": stoi,
+        "tokenizer_path": str(tokenizer_path),
+        "eos_id": eos_id,
         "config": {
             "vocab_size": vocab_size,
             "max_seq_len": max_seq_len,
@@ -238,4 +235,3 @@ torch.save(
     checkpoint_path,
 )
 print(f"Saved checkpoint to {checkpoint_path}")
-

@@ -1,5 +1,6 @@
-# Train BPE tokenizer to size 8000
+# Train a 2,048-token BPE tokenizer, including EOS.
 import json
+import heapq
 from collections import Counter
 from datasets import load_from_disk
 
@@ -84,7 +85,7 @@ def build_vocab(merges):
 
     return vocab
 
-def encode(text, merges):
+def encode_reference(text, merges):
     token_ids = list(text.encode("utf-8"))
 
     while len(token_ids) >= 2:
@@ -104,6 +105,75 @@ def encode(text, merges):
         # Encode the token_ids with merged pairs
         token_ids = merge_pair(token_ids, pair, merges[pair])
     return token_ids
+
+def encode(text, merges):
+    # Find candidates once --> Merge one pair --> Check neighbours --> Merge next
+    values = list(text.encode("utf-8"))
+    number_of_tokens = len(values)
+
+    if number_of_tokens < 2:
+        return values
+    
+    # Set linked list like connection
+    previous = [-1] + list(range(number_of_tokens - 1))
+    following = list(range(1, number_of_tokens)) + [-1]
+    alive = [True] * number_of_tokens
+
+    candidates = []
+
+    # To check the neighbour pairs
+    def add_candidate(left_index):
+        if left_index == -1 or not alive[left_index]:
+            return
+        right_index = following[left_index]
+        if right_index == -1 or not alive[right_index]:
+            return
+        pair = (values[left_index], values[right_index])
+
+        new_id = merges.get(pair)
+
+        if new_id is not None:
+            heapq.heappush(
+                candidates,
+                (new_id, left_index, right_index)
+            )
+    
+    for left_index in range(number_of_tokens -1):
+        add_candidate(left_index)
+    
+    while candidates:
+        new_id, left_index, right_index = heapq.heappop(candidates)
+
+        if (not alive[left_index] or not alive[right_index] or following[left_index] != right_index):
+            continue
+        
+        current_pair = (values[left_index], values[right_index])
+
+        if merges.get(current_pair) != new_id:
+            continue
+        
+        values[left_index] = new_id
+
+        alive[right_index] = False
+
+        token_after_right = following[right_index]
+        following[left_index] = token_after_right
+
+        if token_after_right != -1:
+            previous[token_after_right] = left_index
+        
+        add_candidate(previous[left_index])
+        add_candidate(left_index)
+
+    result = []
+    index = 0
+
+    while index != -1:
+        result.append(values[index])
+        index = following[index]
+    
+    return result
+
 
 
 def decode(token_ids, vocab, eos_id=None):
@@ -147,8 +217,10 @@ def load_tokenizer(path):
 if __name__ == "__main__":
     train_ds = load_from_disk("data/TinyStories/train")
     training_stories = train_ds["text"][:1000]
+    vocab_size = 2048
+    tokenizer_path = f"tinystories_bpe_{vocab_size}.json"
 
-    merges, eos_id = train_bpe(training_stories, vocab_size = 300)
+    merges, eos_id = train_bpe(training_stories, vocab_size=vocab_size)
 
     vocab = build_vocab(merges)
 
@@ -159,10 +231,33 @@ if __name__ == "__main__":
     assert decoded_text == test_text
 
     save_tokenizer(
-        "bpe_tokenizer.json",
+        tokenizer_path,
         merges,
         eos_id,
-        vocab_size=300,
+        vocab_size,
     )
 
+    loaded_merges, loaded_vocab, loaded_eos_id, loaded_vocab_size = (
+        load_tokenizer(tokenizer_path)
+    )
+
+    loaded_token_ids = encode(test_text, loaded_merges)
+    loaded_text = decode(
+        loaded_token_ids,
+        loaded_vocab,
+        loaded_eos_id,
+    )
+
+    assert loaded_text == test_text
+    assert loaded_eos_id == eos_id
+    assert loaded_vocab_size == vocab_size
+
+    original_bytes = len(test_text.encode("utf-8"))
+    bpe_tokens = len(token_ids)
+
+    print(f"Original bytes: {original_bytes}")
+    print(f"BPE tokens: {bpe_tokens}")
+    print(f"Bytes per token: {original_bytes / bpe_tokens:.2f}")
+
     print("Round-trip test passed")
+    print("Saved tokenizer reload test passed")
