@@ -198,7 +198,7 @@ class TinyGPT(nn.Module):
             nn.init.zeros_(module.bias)
     
     @torch.no_grad()
-    def generate(self, token_ids, max_new_tokens, temperature=1.0):
+    def generate(self, token_ids, max_new_tokens, temperature=1.0, eos_id=None):
 
         if temperature <= 0:
             raise ValueError("temperature must be positive")
@@ -226,6 +226,9 @@ class TinyGPT(nn.Module):
 
             # Concatenate the new token to token_ids
             token_ids = torch.cat([token_ids, next_token], dim=1)
+
+            if eos_id is not None and next_token.item() == eos_id:
+                break
 
         return token_ids
 

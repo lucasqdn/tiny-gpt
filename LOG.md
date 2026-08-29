@@ -71,7 +71,7 @@ n_heads = 6
 dropout = 0.0
 n_layers = 8
 
-Run summary
+## Run summary
 Initial training loss: 5.3590
 Final training loss: 0.7569
 Average training loss: 0.7604
@@ -80,9 +80,48 @@ Elapsed training time: 1188.33 seconds
 Tokens per second: 43,086
 Total tokens trained: 51,200,000
 
-Generated sample:
+## Generated sample
 Once upon a time, there was a little girl named Lily. One day, Lily was outside when her mommy accidentally past the ball down and said, "I can frown this car, but you must have passed them all." 
 
 Molly smiled and said, "Okay, I love you!"
 
 The carefully tasted the cord and dressed and the lawyer went to play, fee
+
+## Verdict
+
+It maintained correct sentence structures as well as grammer
+But the story gradually loses its plot
+(Maybe because of 128 characters context which is not that much) so it loses its details quickly
+
+## Things to work on
+
+Add EOS token between stories
+Pack stories together instead of discarding those less than 129 characters
+
+
+# Run 5
+Fixed using EOS tokens and incorporate stories less than 128 characters by creating a stream
+
+## Values
+steps = 50000
+sequence_length = 128
+d_model = 384
+n_heads = 6
+dropout = 0.0
+n_layers = 8
+
+## Run summary
+Initial training loss: 5.1649
+Final training loss: 0.7933
+Average training loss: 0.7494
+Average validation loss: 0.7431
+Elapsed training time: 1220.46 seconds
+Tokens per second: 41,951
+Total tokens trained: 51,200,000
+
+## Verdict
+The model successfully learn how to use EOS
+
+## What to improve on next run
+Switch to BPE, maybe 2048 tokens
+Still keeping other values the same

@@ -26,10 +26,16 @@ for story in train_ds["text"]:
     # update breaks down the words into characters and add them to the set
     characters.update(story)
 
+EOS_TOKEN = "<EOS>"
+
 characters = sorted(characters)
 stoi = {character: i for i, character in enumerate(characters)}
+
+eos_id = len(stoi)
+stoi[EOS_TOKEN] = eos_id
+
 itos = {i: character for character, i in stoi.items()}
-vocab_size = len(characters)
+vocab_size = len(stoi)
 
 model = TinyGPT(
     vocab_size=vocab_size,
@@ -44,7 +50,7 @@ def encode(text):
     return [stoi[character] for character in text]
 
 def decode(token_ids):
-    return "".join(itos[token_id] for token_id in token_ids)
+    return "".join(itos[token_id] for token_id in token_ids if token_id != eos_id)
 
 batch_size = 8
 sequence_length = 128
@@ -59,20 +65,23 @@ def get_batch(dataset, rng):
 
     # Keep sampling until enough batches
     while len(inputs) < batch_size:
-        story_index = rng.randrange(len(dataset))
-        story = dataset[story_index]["text"]
-        token_ids = encode(story)
+        packed_ids = []
 
-        # Ignore stories that are too short
-        if len(token_ids) < sequence_length + 1:
-            continue
+        while len(packed_ids) < sequence_length + 1:
+            # Randomly select a story
+            story_index = rng.randrange(len(dataset))
+            story_ids = encode(dataset[story_index]["text"]) + [eos_id]
 
-        # Choose random starting position
-        # len(token_ids) - seq_length - 1 is the last position you can pick before it overflows
-        start = rng.randint(0, len(token_ids) - sequence_length - 1)
+            # Randomly select a starting point for a story
+            if not packed_ids:
+                start = rng.randrange(len(story_ids))
+                story_ids = story_ids[start:]
+            
+            packed_ids.extend(story_ids)
 
         # Python slicing excludes the ending index
-        chunk = token_ids[start : start + sequence_length + 1]
+        # Cuts down to 129 tokens
+        chunk = packed_ids[: sequence_length + 1]
 
         # Create shifted inputs and targets
         x = torch.tensor(chunk[:-1], dtype=torch.long)
@@ -110,7 +119,6 @@ final_training_loss = None
 
 # Puts the model in training mode
 model.train()
-
 if device == "cuda":
     torch.cuda.synchronize()
 training_start_time = time.perf_counter()
@@ -193,16 +201,22 @@ prompt = "Once upon a time"
 
 prompt_ids = torch.tensor([[stoi[character] for character in prompt]], dtype=torch.long, device=device)
 
-generated_ids = model.generate(prompt_ids, max_new_tokens=300, temperature=0.8)
+generated_ids = model.generate(prompt_ids, max_new_tokens=300, temperature=0.8, eos_id=eos_id)
 
 print("\nGenerated sample:")
 print(decode(generated_ids[0].tolist()))
+
+stopped_at_eos = generated_ids[0, -1].item() == eos_id
+generated_tokens = generated_ids.shape[1] - prompt_ids.shape[1]
+
+print(f"Stopped at EOS: {stopped_at_eos}")
+print(f"Generated tokens: {generated_tokens}")
 
 
 checkpoint_directory = Path("checkpoints")
 checkpoint_directory.mkdir(exist_ok=True)
 
-checkpoint_path = (checkpoint_directory / f"tiny_gpt_step_{num_steps}.pt")
+checkpoint_path = (checkpoint_directory / f"tiny_gpt_run5_step_{num_steps}.pt")
 
 torch.save(
     {
