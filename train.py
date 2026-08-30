@@ -1,5 +1,6 @@
 import torch
 import time
+import math
 from model import TinyGPT
 from token_data import TokenStream
 from tokenizer import (
@@ -84,16 +85,19 @@ fixed_validation_batches = [
     for batch_index in range(num_evaluation_batches)
 ]
 
+num_steps = steps_per_epoch
+max_learning_rate = 3e-4
+min_learning_rate = 3e-5
+warmup_steps = 1000
+run_name = "run9"
+checkpoint_interval = 5000
+
 optimizer = torch.optim.AdamW(
     model.parameters(),
-    lr=3e-4,
+    lr=max_learning_rate,
     betas=(0.9, 0.95),
     weight_decay=0.1,
 )
-
-num_steps = 5000
-run_name = "run9"
-checkpoint_interval = 5000
 
 checkpoint_directory = Path("checkpoints")
 checkpoint_directory.mkdir(exist_ok=True)
@@ -127,7 +131,25 @@ checkpoint_config = {
     "dropout": dropout,
     "batch_size": batch_size,
     "sequence_length": sequence_length,
+    "num_steps": num_steps,
+    "max_learning_rate": max_learning_rate,
+    "min_learning_rate": min_learning_rate,
+    "warmup_steps": warmup_steps,
 }
+
+
+def get_learning_rate(step):
+    # Linearly increase the learning rate during warmup.
+    if step < warmup_steps:
+        return max_learning_rate * (step + 1) / warmup_steps
+
+    # Then smoothly decrease it from max_learning_rate to min_learning_rate.
+    decay_steps = num_steps - warmup_steps
+    decay_progress = (step - warmup_steps) / max(decay_steps - 1, 1)
+    cosine = 0.5 * (1.0 + math.cos(math.pi * decay_progress))
+    return min_learning_rate + cosine * (
+        max_learning_rate - min_learning_rate
+    )
 
 
 def save_checkpoint(path, next_step, elapsed_training_time, metrics=None):
@@ -207,6 +229,10 @@ if device == "cuda":
 training_start_time = time.perf_counter()
 
 for step in range(start_step, num_steps):
+    learning_rate = get_learning_rate(step)
+    for parameter_group in optimizer.param_groups:
+        parameter_group["lr"] = learning_rate
+
     first_block = step * batch_size
     last_block = first_block + batch_size
     block_ids = training_order[first_block:last_block]
@@ -257,7 +283,10 @@ for step in range(start_step, num_steps):
 
     if running_loss_steps == 10:
         average_loss = running_loss / running_loss_steps
-        print(f"step {step + 1}: loss {average_loss:.4f}")
+        print(
+            f"step {step + 1}: loss {average_loss:.4f}, "
+            f"lr {learning_rate:.2e}"
+        )
         running_loss = 0.0
         running_loss_steps = 0
 
