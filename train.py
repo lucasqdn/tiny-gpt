@@ -13,6 +13,9 @@ from pathlib import Path
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 
+use_bf16 = (device == "cuda" and torch.cuda.is_bf16_supported())
+print(f"Using BF16: {use_bf16}")
+
 tokenizer_path = Path("tinystories_bpe_2048.json")
 merges, vocab, eos_id, vocab_size = load_tokenizer(tokenizer_path)
 print(f"BPE tokenizer loaded successfully. Vocabulary size: {vocab_size}")
@@ -121,9 +124,21 @@ for step in range(num_steps):
     # Clear old gradients from previous training step
     optimizer.zero_grad(set_to_none=True)
 
-    # logits: (B, T, vocab_size)
-    # loss: scalar
-    logits, loss = model(inputs, targets)
+    # Autocast uses BF16 for supported CUDA operations while keeping
+    # numerically sensitive operations in FP32.
+    with torch.autocast(
+        device_type=device,
+        dtype=torch.bfloat16,
+        enabled=use_bf16,
+    ):
+        # logits: (B, T, vocab_size)
+        # loss: scalar
+        logits, loss = model(inputs, targets)
+
+    if not torch.isfinite(loss):
+        raise RuntimeError(
+            f"Non-finite loss at step {step}: {loss.item()}"
+        )
 
     current_loss = loss.item()
     if initial_training_loss is None:
@@ -167,7 +182,13 @@ def average_loss(model, batches):
     losses = []
 
     for inputs, targets in batches:
-        _, loss = model(inputs, targets)
+        with torch.autocast(
+            device_type=device,
+            dtype=torch.bfloat16,
+            enabled=use_bf16,
+        ):
+            _, loss = model(inputs, targets)
+
         losses.append(loss.item())
 
     if was_training:
@@ -197,7 +218,17 @@ prompt_ids = torch.tensor(
     device=device,
 )
 
-generated_ids = model.generate(prompt_ids, max_new_tokens=300, temperature=0.8, eos_id=eos_id)
+with torch.autocast(
+    device_type=device,
+    dtype=torch.bfloat16,
+    enabled=use_bf16,
+):
+    generated_ids = model.generate(
+        prompt_ids,
+        max_new_tokens=300,
+        temperature=0.8,
+        eos_id=eos_id,
+    )
 
 print("\nGenerated sample:")
 print(decode(generated_ids[0].tolist()))
@@ -221,6 +252,7 @@ torch.save(
         "optimizer_state_dict": optimizer.state_dict(),
         "tokenizer_path": str(tokenizer_path),
         "eos_id": eos_id,
+        "use_bf16": use_bf16,
         "config": {
             "vocab_size": vocab_size,
             "max_seq_len": max_seq_len,
