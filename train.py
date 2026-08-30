@@ -1,8 +1,7 @@
 import torch
-import random
 import time
-from datasets import load_from_disk
 from model import TinyGPT
+from token_data import TokenStream
 from tokenizer import (
     decode as bpe_decode,
     encode as bpe_encode,
@@ -14,20 +13,29 @@ from pathlib import Path
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 
-train_ds = load_from_disk("data/TinyStories/train")
-validation_ds = load_from_disk("data/TinyStories/validation")
-print("Training and validation datasets loaded successfully.")
-
 tokenizer_path = Path("tinystories_bpe_2048.json")
 merges, vocab, eos_id, vocab_size = load_tokenizer(tokenizer_path)
 print(f"BPE tokenizer loaded successfully. Vocabulary size: {vocab_size}")
 
-random.seed(1337)
 torch.manual_seed(1337)
 torch.cuda.manual_seed_all(1337)
-training_rng = random.Random(1337)
-training_eval_rng = random.Random(2024)
-validation_rng = random.Random(2025)
+
+batch_size = 8
+sequence_length = 128
+
+tokenized_directory = Path("data/TinyStories/tokenized")
+train_stream = TokenStream(
+    tokenized_directory / "train.bin",
+    sequence_length,
+)
+validation_stream = TokenStream(
+    tokenized_directory / "validation.bin",
+    sequence_length,
+)
+
+steps_per_epoch = train_stream.number_of_blocks // batch_size
+print(f"Training blocks: {train_stream.number_of_blocks:,}")
+print(f"Steps per epoch: {steps_per_epoch:,}")
 
 model = TinyGPT(
     vocab_size=vocab_size,
@@ -44,57 +52,33 @@ def encode(text):
 def decode(token_ids):
     return bpe_decode(token_ids, vocab, eos_id)
 
-batch_size = 8
-sequence_length = 128
-
-# Create one group of training examples
-# 1 input pair with 1 target
-def get_batch(dataset, rng):
-    # inputs: (batch_size, sequence_length)
-    # target: (batch_size, sequence_length)
-    inputs = []
-    targets = []
-
-    # Keep sampling until enough batches
-    while len(inputs) < batch_size:
-        packed_ids = []
-
-        while len(packed_ids) < sequence_length + 1:
-            # Randomly select a story
-            story_index = rng.randrange(len(dataset))
-            story_ids = encode(dataset[story_index]["text"]) + [eos_id]
-
-            # Randomly select a starting point for a story
-            if not packed_ids:
-                start = rng.randrange(len(story_ids))
-                story_ids = story_ids[start:]
-            
-            packed_ids.extend(story_ids)
-
-        # Python slicing excludes the ending index
-        # Cuts down to 129 tokens
-        chunk = packed_ids[: sequence_length + 1]
-
-        # Create shifted inputs and targets
-        x = torch.tensor(chunk[:-1], dtype=torch.long)
-        y = torch.tensor(chunk[1:], dtype=torch.long)
-
-        inputs.append(x)
-        targets.append(y)
-
-    inputs = torch.stack(inputs).to(device)
-    targets = torch.stack(targets).to(device)
-
-    return inputs, targets
-
 num_evaluation_batches = 20
 
+fixed_training_ids = train_stream.create_epoch_order(seed=2024)[
+    :num_evaluation_batches * batch_size
+]
+fixed_validation_ids = validation_stream.create_epoch_order(seed=2025)[
+    :num_evaluation_batches * batch_size
+]
+
 fixed_training_batches = [
-    get_batch(train_ds, training_eval_rng) for _ in range(num_evaluation_batches)
+    train_stream.get_batch(
+        fixed_training_ids[
+            batch_index * batch_size:(batch_index + 1) * batch_size
+        ],
+        device,
+    )
+    for batch_index in range(num_evaluation_batches)
 ]
 
 fixed_validation_batches = [
-    get_batch(validation_ds, validation_rng) for _ in range(num_evaluation_batches)
+    validation_stream.get_batch(
+        fixed_validation_ids[
+            batch_index * batch_size:(batch_index + 1) * batch_size
+        ],
+        device,
+    )
+    for batch_index in range(num_evaluation_batches)
 ]
 
 optimizer = torch.optim.AdamW(
@@ -105,6 +89,15 @@ optimizer = torch.optim.AdamW(
 )
 
 num_steps = 5000
+
+if num_steps > steps_per_epoch:
+    raise ValueError(
+        f"num_steps {num_steps:,} exceeds one epoch of "
+        f"{steps_per_epoch:,} steps"
+    )
+
+training_order = train_stream.create_epoch_order(seed=1337)
+
 running_loss = 0
 initial_training_loss = None
 final_training_loss = None
@@ -116,7 +109,14 @@ if device == "cuda":
 training_start_time = time.perf_counter()
 
 for step in range(num_steps):
-    inputs, targets = get_batch(train_ds, training_rng)
+    first_block = step * batch_size
+    last_block = first_block + batch_size
+    block_ids = training_order[first_block:last_block]
+
+    inputs, targets = train_stream.get_batch(
+        block_ids,
+        device,
+    )
 
     # Clear old gradients from previous training step
     optimizer.zero_grad(set_to_none=True)
@@ -212,7 +212,7 @@ print(f"Generated tokens: {generated_tokens}")
 checkpoint_directory = Path("checkpoints")
 checkpoint_directory.mkdir(exist_ok=True)
 
-checkpoint_path = checkpoint_directory / f"tiny_gpt_run7_step_{num_steps}.pt"
+checkpoint_path = checkpoint_directory / f"tiny_gpt_run8_step_{num_steps}.pt"
 
 torch.save(
     {
