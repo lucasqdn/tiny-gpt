@@ -92,6 +92,16 @@ optimizer = torch.optim.AdamW(
 )
 
 num_steps = 5000
+run_name = "run9"
+checkpoint_interval = 5000
+
+checkpoint_directory = Path("checkpoints")
+checkpoint_directory.mkdir(exist_ok=True)
+latest_checkpoint_path = checkpoint_directory / f"tiny_gpt_{run_name}_latest.pt"
+
+# Leave this as None to start a new run. To resume, set it to a checkpoint:
+# resume_checkpoint = Path("checkpoints/tiny_gpt_run9_latest.pt")
+resume_checkpoint = None
 
 if num_steps > steps_per_epoch:
     raise ValueError(
@@ -102,8 +112,93 @@ if num_steps > steps_per_epoch:
 training_order = train_stream.create_epoch_order(seed=1337)
 
 running_loss = 0
+running_loss_steps = 0
 initial_training_loss = None
 final_training_loss = None
+start_step = 0
+previous_elapsed_time = 0.0
+
+checkpoint_config = {
+    "vocab_size": vocab_size,
+    "max_seq_len": max_seq_len,
+    "d_model": d_model,
+    "n_heads": n_heads,
+    "n_layers": n_layers,
+    "dropout": dropout,
+    "batch_size": batch_size,
+    "sequence_length": sequence_length,
+}
+
+
+def save_checkpoint(path, next_step, elapsed_training_time, metrics=None):
+    checkpoint = {
+        # next_step is the first step that has not been trained yet.
+        "next_step": next_step,
+        "num_steps": num_steps,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "tokenizer_path": str(tokenizer_path),
+        "eos_id": eos_id,
+        "use_bf16": use_bf16,
+        "elapsed_training_time": elapsed_training_time,
+        "initial_training_loss": initial_training_loss,
+        "final_training_loss": final_training_loss,
+        "running_loss": running_loss,
+        "running_loss_steps": running_loss_steps,
+        "torch_rng_state": torch.get_rng_state(),
+        "cuda_rng_state": (
+            torch.cuda.get_rng_state_all() if device == "cuda" else None
+        ),
+        "config": checkpoint_config,
+    }
+
+    if metrics is not None:
+        checkpoint.update(metrics)
+
+    # Write to a temporary file first. replace() only changes the visible
+    # checkpoint after torch.save has completed successfully.
+    temporary_path = path.with_suffix(path.suffix + ".tmp")
+    torch.save(checkpoint, temporary_path)
+    temporary_path.replace(path)
+
+
+if resume_checkpoint is not None:
+    resume_checkpoint = Path(resume_checkpoint)
+    checkpoint = torch.load(
+        resume_checkpoint,
+        map_location=device,
+        weights_only=False,
+    )
+
+    if checkpoint.get("config") != checkpoint_config:
+        raise ValueError(
+            "The checkpoint configuration does not match the current "
+            "model, batch size, or sequence length"
+        )
+
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+    start_step = checkpoint["next_step"]
+    previous_elapsed_time = checkpoint.get("elapsed_training_time", 0.0)
+    initial_training_loss = checkpoint.get("initial_training_loss")
+    final_training_loss = checkpoint.get("final_training_loss")
+    running_loss = checkpoint.get("running_loss", 0.0)
+    running_loss_steps = checkpoint.get("running_loss_steps", 0)
+
+    torch.set_rng_state(checkpoint["torch_rng_state"].cpu())
+    if device == "cuda" and checkpoint.get("cuda_rng_state") is not None:
+        torch.cuda.set_rng_state_all(
+            [state.cpu() for state in checkpoint["cuda_rng_state"]]
+        )
+
+    if start_step > num_steps:
+        raise ValueError(
+            f"Checkpoint starts at step {start_step:,}, but num_steps is "
+            f"only {num_steps:,}"
+        )
+
+    print(f"Resuming from {resume_checkpoint} at step {start_step:,}")
 
 # Puts the model in training mode
 model.train()
@@ -111,7 +206,7 @@ if device == "cuda":
     torch.cuda.synchronize()
 training_start_time = time.perf_counter()
 
-for step in range(num_steps):
+for step in range(start_step, num_steps):
     first_block = step * batch_size
     last_block = first_block + batch_size
     block_ids = training_order[first_block:last_block]
@@ -158,15 +253,36 @@ for step in range(num_steps):
     optimizer.step()
 
     running_loss += current_loss
+    running_loss_steps += 1
 
-    if (step + 1) % 10 == 0:
-        average_loss = running_loss / 10
+    if running_loss_steps == 10:
+        average_loss = running_loss / running_loss_steps
         print(f"step {step + 1}: loss {average_loss:.4f}")
         running_loss = 0.0
+        running_loss_steps = 0
+
+    if (step + 1) % checkpoint_interval == 0:
+        if device == "cuda":
+            torch.cuda.synchronize()
+        checkpoint_elapsed_time = (
+            previous_elapsed_time
+            + time.perf_counter()
+            - training_start_time
+        )
+        save_checkpoint(
+            latest_checkpoint_path,
+            next_step=step + 1,
+            elapsed_training_time=checkpoint_elapsed_time,
+        )
+        print(f"Saved checkpoint to {latest_checkpoint_path}")
 
 if device == "cuda":
     torch.cuda.synchronize()
-elapsed_time = time.perf_counter() - training_start_time
+elapsed_time = (
+    previous_elapsed_time
+    + time.perf_counter()
+    - training_start_time
+)
 
 total_tokens_trained = num_steps * batch_size * sequence_length
 tokens_per_second = total_tokens_trained / elapsed_time
@@ -240,30 +356,17 @@ print(f"Stopped at EOS: {stopped_at_eos}")
 print(f"Generated tokens: {generated_tokens}")
 
 
-checkpoint_directory = Path("checkpoints")
-checkpoint_directory.mkdir(exist_ok=True)
+checkpoint_path = (
+    checkpoint_directory / f"tiny_gpt_{run_name}_step_{num_steps}.pt"
+)
 
-checkpoint_path = checkpoint_directory / f"tiny_gpt_run8_step_{num_steps}.pt"
-
-torch.save(
-    {
-        "step": num_steps,
-        "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict(),
-        "tokenizer_path": str(tokenizer_path),
-        "eos_id": eos_id,
-        "use_bf16": use_bf16,
-        "config": {
-            "vocab_size": vocab_size,
-            "max_seq_len": max_seq_len,
-            "d_model": d_model,
-            "n_heads": n_heads,
-            "n_layers": n_layers,
-            "dropout": dropout,
-        },
+save_checkpoint(
+    checkpoint_path,
+    next_step=num_steps,
+    elapsed_training_time=elapsed_time,
+    metrics={
         "average_training_loss": average_training_loss,
         "average_validation_loss": average_validation_loss,
     },
-    checkpoint_path,
 )
 print(f"Saved checkpoint to {checkpoint_path}")
