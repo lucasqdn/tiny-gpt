@@ -231,3 +231,29 @@ Generated tokens: 231
 ## Verdict
 The model trained very well at 64 batches
 Runs at 387000 tokens/s, 5 times faster than run 7
+
+
+# Run 9
+## Run summary
+Initial training loss: 7.6972
+Final training loss: 1.7637
+Average training loss: 1.7670
+Average validation loss: 1.7602
+Elapsed training time: 1240.95 seconds
+Tokens per second: 375,092
+Total tokens trained: 465,469,440
+
+## Generated sample:
+Once upon a time, a little girl named Lily went for a walk with her mom. They saw a big tree and Lily said, "Look mommy, the tree is so pretty!" Her mom said, "Yes, it's a rich tree."
+As they continued their walk, they saw a sign that said, "Do not cross." Lily's mom said, "Oh look at some treasures in the park." Lily said, "Plane means crossing everything."
+Suddenly, they heard a loud noise. It was a naughty dog! The dog had sniffed everything before running and running. The kids got scared and ran away. Lily's mom said, "Lily, we should always be careful and not run away."
+Lily nodded and said, "I understand. We should always listen to our parents and not cross animals." Lily nodded and said, "I won't, mom."
+And they lived happily ever after. The end.
+
+Stopped at EOS: True
+Generated tokens: 176
+
+## Verdict
+Run 9 was a success
+Training loss and validation loss is roughly equal so no overtraining
+Can probably train for an extra epoch

@@ -4,10 +4,14 @@ from model import TinyGPT
 from tokenizer import decode, encode, load_tokenizer
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
+use_bf16 = device == "cuda" and torch.cuda.is_bf16_supported()
+
+checkpoint_path = "checkpoints/tiny_gpt_run9_step_56820.pt"
 
 checkpoint = torch.load(
-    "checkpoints/tiny_gpt_run6_step_50000.pt",
+    checkpoint_path,
     map_location=device,
+    weights_only=False,
 )
 
 tokenizer_path = checkpoint["tokenizer_path"]
@@ -21,7 +25,20 @@ if vocab_size != checkpoint["config"]["vocab_size"]:
 if eos_id != checkpoint["eos_id"]:
     raise ValueError("Tokenizer and checkpoint EOS IDs do not match")
 
-model = TinyGPT(**checkpoint["config"]).to(device)
+model_config_keys = (
+    "vocab_size",
+    "max_seq_len",
+    "d_model",
+    "n_heads",
+    "n_layers",
+    "dropout",
+)
+model_config = {
+    key: checkpoint["config"][key]
+    for key in model_config_keys
+}
+
+model = TinyGPT(**model_config).to(device)
 model.load_state_dict(checkpoint["model_state_dict"])
 model.eval()
 
@@ -44,12 +61,17 @@ for sample_number in range(number_of_samples):
         device=device,
     )
 
-    generated_ids = model.generate(
-        prompt_ids,
-        max_new_tokens=max_new_tokens,
-        temperature=0.8,
-        eos_id=eos_id,
-    )
+    with torch.autocast(
+        device_type=device,
+        dtype=torch.bfloat16,
+        enabled=use_bf16,
+    ):
+        generated_ids = model.generate(
+            prompt_ids,
+            max_new_tokens=max_new_tokens,
+            temperature=0.8,
+            eos_id=eos_id,
+        )
 
     # Remove the prompt so only newly generated IDs remain.
     new_ids = generated_ids[0, prompt_ids.shape[1]:].tolist()
