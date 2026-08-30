@@ -207,3 +207,27 @@ Throughput sped up by 2.03x --> roughly 286500 source bytes/second
 - Pretokenize the data
 - BF16
 - Test larger batch sizes
+
+
+# Run 8
+## Run summary
+Initial training loss: 7.6972
+Final training loss: 2.2453
+Average training loss: 2.3109
+Average validation loss: 2.2981
+Elapsed training time: 105.84 seconds
+Tokens per second: 387,013
+Total tokens trained: 40,960,000
+
+## Generated sample:
+Once upon a time, a fox was all alone and very big I was scared. I wanted to be your friend, Tim." Tim could not believe his eyes. He tried to be a giraffe, but it was too fast. Tim was too small and scared to go back to his friends.
+
+Tim's friends noticed how sad he was. They came to come with him. The giraffe said, "Timmy, let's make a zigzag safe place!" Tim and his friends went to the zigzag. They used white paws to put on books and paper in, and sang. One, two, the zigaffed giraffe came up with a cat inside. It looked like the mouse had pictures. Timmy felt happy knowing he did something.
+
+From that day on, Timmy and his friends would pass up in the zigzag and watch the cat for a while. They would admire their games together and sing around it. Timmy showed his new team full of the zigzage that was the one who could play with him. He thanked Tim and his friends for letting them play in their opconyst.
+Stopped at EOS: True
+Generated tokens: 231
+
+## Verdict
+The model trained very well at 64 batches
+Runs at 387000 tokens/s, 5 times faster than run 7

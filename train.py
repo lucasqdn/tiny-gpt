@@ -23,7 +23,7 @@ print(f"BPE tokenizer loaded successfully. Vocabulary size: {vocab_size}")
 torch.manual_seed(1337)
 torch.cuda.manual_seed_all(1337)
 
-batch_size = 8
+batch_size = 64
 sequence_length = 128
 
 tokenized_directory = Path("data/TinyStories/tokenized")
